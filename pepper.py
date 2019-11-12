@@ -20,13 +20,19 @@ class BaseSensorService(object):
         if not GPIO.input(self.sensor_pin):
             GPIO.output(self.sensor_pin, 1)
             if self.indicator_pin:
-                GPIO.output(self.indicator_pin, 1)
+                self.power_on_indicator()
 
     def disable(self):
         if GPIO.input(self.sensor_pin):
             GPIO.output(self.sensor_pin, 0)
             if self.indicator_pin:
-                GPIO.output(self.indicator_pin, 0)
+                self.power_off_indicator()
+
+    def power_on_indicator(self):
+        GPIO.output(self.indicator_pin, 1)
+
+    def power_off_indicator(self):
+        GPIO.output(self.indicator_pin, 0)
 
     def run(self):
         raise NotImplementedError
@@ -122,13 +128,13 @@ class Controller(object):
         if self.light_process is not None and self.light_process.is_alive():
             self.light_process.terminate()
             self.light_process = None
-            self.light_service.disable()
+            self.light_service.power_off_indicator()
 
         # kill temperature process
         if self.temperature_process is not None and self.temperature_process.is_alive():
             self.temperature_process.terminate()
             self.temperature_process = None
-            self.temperature_service.disable()
+            self.temperature_service.power_off_indicator()
 
     def run(self):
         while True:
