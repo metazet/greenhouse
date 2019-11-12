@@ -16,13 +16,13 @@ class BaseSensorService(object):
         GPIO.output(self.indicator_pin, 0)
 
     def enable(self):
-        if not GPIO.output(self.sensor_pin):
+        if not GPIO.input(self.sensor_pin):
             GPIO.output(self.sensor_pin, 1)
             if self.indicator_pin:
                 GPIO.output(self.indicator_pin, 1)
 
     def disable(self):
-        if GPIO.output(self.sensor_pin):
+        if GPIO.input(self.sensor_pin):
             GPIO.output(self.sensor_pin, 0)
             if self.indicator_pin:
                 GPIO.output(self.indicator_pin, 0)
@@ -99,9 +99,14 @@ class Controller(object):
         self.temperature_service.run()
 
         while True:
-            if GPIO.input(5) == False:
-                time.sleep(5)  # if main switch is off - wait for 5 seconds
-                continue
+            if GPIO.input(self.POWER_PIN):
+                self.light_service.run()
+                self.temperature_service.run()
+            else:
+                self.light_service.stop()
+                self.temperature_service.stop()
+            time.sleep(1)
+            continue
 
 
 if __name__ == "__main__":
