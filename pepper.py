@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 import time
 import datetime
+import multiprocessing
 
 import RPi.GPIO as GPIO
 
@@ -30,10 +31,6 @@ class BaseSensorService(object):
     def run(self):
         raise NotImplementedError
 
-    def stop(self):
-        # TODO: kill running thread
-        pass
-
 
 class TemperatureService(BaseSensorService):
     """ Service which control temperature: start it and stop on temperature threshold. """
@@ -46,10 +43,10 @@ class TemperatureService(BaseSensorService):
 
     def get_current_temperature(self):
         """ Read from sensor and return current temperature. """
+        # TODO: return real temperature from sensor
         return self.temperature_threshold
 
     def run(self):
-        # TODO: convert to run in thread with possibility to stop
         while True:
             current_temperature = self.get_current_temperature()
             if current_temperature >= self.temperature_threshold:
@@ -62,11 +59,13 @@ class TemperatureService(BaseSensorService):
 class LightService(BaseSensorService):
     """ Service which control light: start it and stop on time. """
 
+    def if_daylight_hours(self):
+        hour = datetime.datetime.utcnow().hour
+        return 6 <= hour <= 22
+
     def run(self):
-        # TODO: convert to run in thread with possibility to stop
         while True:
-            hour = datetime.datetime.utcnow().hour
-            if hour >= 6 and hour <= 22:
+            if self.if_daylight_hours():
                 self.enable()
             else:
                 self.disable()
@@ -74,6 +73,13 @@ class LightService(BaseSensorService):
 
 
 class Controller(object):
+    """ Sensors controller which check main power and start/stop sensor services (in processes).
+
+        Usage:
+            controller = Controller()
+            controller.run()
+        """
+
     MAIN_INDICATOR_PIN = 2
     POWER_PIN = 5
     LIGHT_SENSOR_PIN = 3
@@ -86,25 +92,52 @@ class Controller(object):
 
         # init output and make them power=0
         GPIO.setup(self.MAIN_INDICATOR_PIN, GPIO.OUT)  # indicator that controller working
-        GPIO.output(self.MAIN_INDICATOR_PIN, 1)
 
         # init input
         GPIO.setup(self.POWER_PIN, GPIO.IN)  # main power switch
 
         self.light_service = LightService(self.LIGHT_SENSOR_PIN, self.LIGHT_INDICATOR_PIN)
+        self.light_process = None
+
         self.temperature_service = TemperatureService(self.TEMPERATURE_SENSOR_PIN, self.TEMPERATURE_INDICATOR_PIN)
+        self.temperature_process = None
+
+    def run_services(self):
+        """ Start sensor services in stand alone processes. """
+
+        # start light process
+        if self.light_process is None:
+            self.light_process = multiprocessing.Process(target=self.light_service.run)
+            self.light_process.start()
+
+        # start temperature process
+        if self.temperature_process is None:
+            self.temperature_process = multiprocessing.Process(target=self.temperature_service.run)
+            self.temperature_process.start()
+
+    def stop_services(self):
+        """ Kill processes. """
+
+        # kill light process
+        if self.light_process is not None and self.light_process.is_alive():
+            self.light_process.terminate()
+            self.light_process = None
+            self.light_service.disable()
+
+        # kill temperature process
+        if self.temperature_process is not None and self.temperature_process.is_alive():
+            self.temperature_process.terminate()
+            self.temperature_process = None
+            self.temperature_service.disable()
 
     def run(self):
-        self.light_service.run()
-        self.temperature_service.run()
-
         while True:
             if GPIO.input(self.POWER_PIN):
-                self.light_service.run()
-                self.temperature_service.run()
+                GPIO.output(self.MAIN_INDICATOR_PIN, 1)
+                self.run_services()
             else:
-                self.light_service.stop()
-                self.temperature_service.stop()
+                GPIO.output(self.MAIN_INDICATOR_PIN, 0)
+                self.stop_services()
             time.sleep(1)
             continue
 
