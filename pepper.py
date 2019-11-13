@@ -6,27 +6,30 @@ import multiprocessing
 import RPi.GPIO as GPIO
 
 
-class BaseSensorService(object):
-    def __init__(self, sensor_pin, indicator_pin=None):
-        self.sensor_pin = sensor_pin  # where the sensor is
-        self.indicator_pin = indicator_pin  # where indicator is
+class BaseRelayService(object):
+    def __init__(self, relay_pin, indicator_pin):
+        """ Params are self-descriptive, here we just initialize pins.
 
-        GPIO.setup(self.sensor_pin, GPIO.OUT)
-        GPIO.output(self.sensor_pin, 0)
+        Usage:
+            service = YourOwnService(2, 3)
+            service.enable()  # for switch relay on
+            service.disable()  # for switch relay off
+        """
+        self.relay_pin = relay_pin  # where the relay is
+        self.indicator_pin = indicator_pin  # where the indicator is
+
+        GPIO.setup(self.relay_pin, GPIO.OUT)
+        GPIO.output(self.relay_pin, 0)
         GPIO.setup(self.indicator_pin, GPIO.OUT)
         GPIO.output(self.indicator_pin, 0)
 
     def enable(self):
-        if not GPIO.input(self.sensor_pin):
-            GPIO.output(self.sensor_pin, 1)
-            if self.indicator_pin:
-                self.power_on_indicator()
+        GPIO.output(self.relay_pin, 1)
+        self.power_on_indicator()
 
     def disable(self):
-        if GPIO.input(self.sensor_pin):
-            GPIO.output(self.sensor_pin, 0)
-            if self.indicator_pin:
-                self.power_off_indicator()
+        GPIO.output(self.relay_pin, 0)
+        self.power_off_indicator()
 
     def power_on_indicator(self):
         GPIO.output(self.indicator_pin, 1)
@@ -38,19 +41,25 @@ class BaseSensorService(object):
         raise NotImplementedError
 
 
-class TemperatureService(BaseSensorService):
+class TemperatureService(BaseRelayService):
     """ Service which control temperature: start it and stop on temperature threshold. """
 
-    def __init__(self, sensor_pin, indicator_pin, temperature_threshold=28):
-        """ temperature_threshold is a temperature when we should DISABLE heating. """
+    def __init__(self, relay_pin, indicator_pin, sensor_pin, temperature_threshold=28):
+        """  sensor_pin is a pin where we'll read temperature data.
+             temperature_threshold is a temperature when we should DISABLE heating.
+        """
 
-        super().__init__(sensor_pin, indicator_pin)
+        super().__init__(relay_pin, indicator_pin)
+
         self.temperature_threshold = temperature_threshold
+
+        self.sensor_pin = sensor_pin
+        GPIO.setup(self.sensor_pin, GPIO.IN)
 
     def get_current_temperature(self):
         """ Read from sensor and return current temperature. """
         # TODO: return real temperature from sensor
-        return self.temperature_threshold
+        return 25
 
     def run(self):
         while True:
@@ -62,7 +71,7 @@ class TemperatureService(BaseSensorService):
             time.sleep(60*5)  # 5 minutes
 
 
-class LightService(BaseSensorService):
+class LightService(BaseRelayService):
     """ Service which control light: start it and stop on time. """
 
     def if_daylight_hours(self):
@@ -79,22 +88,25 @@ class LightService(BaseSensorService):
 
 
 class Controller(object):
-    """ Sensors controller which check main power and start/stop sensor services (in processes).
+    """ Sensors controller which check main power and start/stop relay
+        services (in separate processes).
 
         Usage:
             controller = Controller()
             controller.run()
         """
 
-    MAIN_INDICATOR_PIN = 2
-    POWER_PIN = 5
-    LIGHT_SENSOR_PIN = 3
-    LIGHT_INDICATOR_PIN = 4
-    TEMPERATURE_SENSOR_PIN = 6
-    TEMPERATURE_INDICATOR_PIN = 7
+    MAIN_INDICATOR_PIN = 3
+    POWER_PIN = 14
+    LIGHT_RELAY_PIN = 27
+    LIGHT_INDICATOR_PIN = 17
+    TEMPERATURE_RELAY_PIN = 10
+    TEMPERATURE_INDICATOR_PIN = 9
+    TEMPERATURE_SENSOR_PIN = 11
 
     def __init__(self):
         GPIO.setmode(GPIO.BCM)
+        GPIO.setwarnings(False)
 
         # init output and make them power=0
         GPIO.setup(self.MAIN_INDICATOR_PIN, GPIO.OUT)  # indicator that controller working
@@ -102,10 +114,12 @@ class Controller(object):
         # init input
         GPIO.setup(self.POWER_PIN, GPIO.IN)  # main power switch
 
-        self.light_service = LightService(self.LIGHT_SENSOR_PIN, self.LIGHT_INDICATOR_PIN)
+        self.light_service = LightService(self.LIGHT_RELAY_PIN, self.LIGHT_INDICATOR_PIN)
         self.light_process = None
 
-        self.temperature_service = TemperatureService(self.TEMPERATURE_SENSOR_PIN, self.TEMPERATURE_INDICATOR_PIN)
+        self.temperature_service = TemperatureService(self.TEMPERATURE_RELAY_PIN,
+                                                      self.TEMPERATURE_INDICATOR_PIN,
+                                                      self.TEMPERATURE_SENSOR_PIN)
         self.temperature_process = None
 
     def run_services(self):
