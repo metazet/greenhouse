@@ -68,13 +68,15 @@ class TemperatureService(BaseRelayService):
             ! in following format: /sys/bus/w1/devices/28*/w1_slave r
 
             # got codebase from http://abyz.me.uk/rpi/pigpio/examples.html#Python_DS18B20-1_py
+
+            If no sensor connected - return None
         """
         pigpio.exceptions = False
         c, files = self.pi.file_list("/sys/bus/w1/devices/28-*/w1_slave")
         pigpio.exceptions = True
 
         if c >= 0:
-            for sensor in files[:-1].split("\n"):
+            for sensor in files[:-1].split(b"\n"):
                 h = self.pi.file_open(sensor, pigpio.FILE_READ)
                 c, data = self.pi.file_read(h, 1000)  # 1000 is plenty to read full file.
                 self.pi.file_close(h)
@@ -86,11 +88,12 @@ class TemperatureService(BaseRelayService):
                 73 01 4b 46 7f ff 0d 10 41 t=23187
                 """
 
-                if "YES" in data:
-                    (discard, sep, reading) = data.partition(' t=')
+                if b"YES" in data:
+                    (discard, sep, reading) = data.partition(b' t=')
                     t = float(reading) / 1000.0
                     return t
                 return 999
+        return None
 
     def run(self):
         while True:
@@ -99,7 +102,7 @@ class TemperatureService(BaseRelayService):
                 return
 
             current_temperature = self.get_current_temperature()
-            if current_temperature >= self.temperature_threshold:
+            if current_temperature is None or current_temperature >= self.temperature_threshold:
                 self.disable()
             else:
                 self.enable()
